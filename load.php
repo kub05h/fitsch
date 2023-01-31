@@ -1,4 +1,5 @@
 <?php
+    header("Access-Control-Allow-Origin: *");
     $opts = [
         "http" => [
             "method" => "GET",
