@@ -9,6 +9,10 @@ var file = { "sem": "", "studies": [], "grades": [],
 var year = (new Date()).getMonth() + 1 >= 8 ? (new Date()).getFullYear() : (new Date()).getFullYear() - 1; // Academic year (from august display next ac. year)
 var fakeHtml = document.implementation.createHTMLDocument('virtual');                                      // https://stackoverflow.com/a/50194774/7361496
 var loadUrl = "./load.php";
+// source: https://www.fit.vut.cz/study/calendar/.cs
+// TODO: get this data automatically
+var winterStart = {2022: "2022-09-19", 2023: "2023-09-18"};
+var summerStart = {2023: "2023-02-06", 2024: "2024-02-05"};
 ///////////////////////////////////// Main /////////////////////////////////////
 $(document).ready(async function() {
     // Semester radio auto select
@@ -1561,9 +1565,37 @@ function getLessonCategory(les) {
     if(isCustom) out += (out != "" ? "," : "") + "Vlastní hodina";
     return out;
 } // checked
+function generateICalEvent(les, fromDatetime, toDatetime, weeklyInterval, count=1) {
+    var fromDatetimeIcal = getIcalDatetime(fromDatetime);
+    var toDatetimeIcal = getIcalDatetime(toDatetime);
+    var typeString = getTypeString(les.type);
+    var createdDatetime = getIcalDatetime(new Date);
+
+    // Event header
+    let contents = "BEGIN:VEVENT\r\n";
+    contents += "UID:" + fromDatetime + "-" + les.id + "\r\n";
+    contents += "DTSTAMP;TZID=Europe/Prague:" + createdDatetime + "\r\n";
+
+    // Datetimes
+    contents += "DTSTART;TZID=Europe/Prague:" + fromDatetimeIcal + "\r\n";
+    contents += "DTEND;TZID=Europe/Prague:" + toDatetimeIcal + "\r\n";
+    if (weeklyInterval != 0) {
+        contents += "RRULE:FREQ=WEEKLY;INTERVAL=" + weeklyInterval + ";COUNT=" + count + "\r\n";
+    }
+
+    // Additional info
+    contents += "SUMMARY:" + les.name + " " + typeString + "\r\n";
+    contents += "LOCATION:" + les.rooms.join(" ") + "\r\n";
+    contents += "URL:https://www.fit.vut.cz/study/course/" + les.link + "\r\n";
+    if(getLessonCategory(les) != "") contents += "CATEGORIES:" + getLessonCategory(les) + "\r\n"; // custom color
+
+    // Event footer
+    contents += "END:VEVENT\r\n";
+
+    return contents;
+} // checked
 function exportICal() {
     var contents = "";
-    var createdDatetime = getIcalDatetime(new Date);
 
     // iCalendar header
     contents += "BEGIN:VCALENDAR\r\n";
@@ -1574,32 +1606,30 @@ function exportICal() {
     $.each(lessons, function(j, les) {
         if(!les.selected) return;
         // Calculate correct datetimes from les object
-        var fromDatetime = getDatetimeFromHourNumber(les.from, les.day, les.week);
-        var fromDatetimeIcal = getIcalDatetime(fromDatetime);
-        var toDatetime = getDatetimeFromHourNumber(les.to, les.day, les.week);
-        toDatetime = new Date(toDatetime.getTime() - 10 * 1000 * 60);
-        var toDatetimeIcal = getIcalDatetime(toDatetime);
-
-        var typeString = getTypeString(les.type);
-
-        // Event header
-        contents += "BEGIN:VEVENT\r\n";
-        contents += "UID:" + createdDatetime + "-" + les.id + "\r\n";
-        contents += "DTSTAMP;TZID=Europe/Prague:" + createdDatetime + "\r\n";
-
-        // Datetimes
-        contents += "DTSTART;TZID=Europe/Prague:" + fromDatetimeIcal + "\r\n";
-        contents += "DTEND;TZID=Europe/Prague:" + toDatetimeIcal + "\r\n";
-        contents += "RRULE:FREQ=WEEKLY;INTERVAL=" + (les.week == "" ? 1 : 2) + "\r\n";
-
-        // Additional info
-        contents += "SUMMARY:" + les.name + " " + typeString + "\r\n";
-        contents += "LOCATION:" + les.rooms.join(" ") + "\r\n";
-        contents += "URL:https://www.fit.vut.cz/study/course/" + les.link + "\r\n";
-        if(getLessonCategory(les) != "") contents += "CATEGORIES:" + getLessonCategory(les) + "\r\n"; // custom color
-
-        // Event footer
-        contents += "END:VEVENT\r\n";
+        if(les.week.includes("sudý")) {
+            var fromDatetime = getDatetimeFromHourNumber(les.from, les.day, 2, year, file.semester == "summer");
+            var toDatetime = getDatetimeFromHourNumber(les.to, les.day, 2, file.year, file.semester == "summer");
+            toDatetime = new Date(toDatetime.getTime() - 10 * 1000 * 60);
+            contents += generateICalEvent(les, fromDatetime, toDatetime, 2, 6);
+        } else if(les.week.includes("lichý")) {
+            var fromDatetime = getDatetimeFromHourNumber(les.from, les.day, 1, year, file.semester == "summer");
+            var toDatetime = getDatetimeFromHourNumber(les.to, les.day, 1, file.year, file.semester == "summer");
+            toDatetime = new Date(toDatetime.getTime() - 10 * 1000 * 60);
+            contents += generateICalEvent(les, fromDatetime, toDatetime, 2, 7);
+        } else if(les.week == "") {
+            var fromDatetime = getDatetimeFromHourNumber(les.from, les.day, 1, year, file.semester == "summer");
+            var toDatetime = getDatetimeFromHourNumber(les.to, les.day, 1, file.year, file.semester == "summer");
+            toDatetime = new Date(toDatetime.getTime() - 10 * 1000 * 60);
+            contents += generateICalEvent(les, fromDatetime, toDatetime, 1, 13);
+        } else {
+            var weeks = les.week.split(" ");
+            $.each(weeks, function(i, week) {
+                var fromDatetime = getDatetimeFromHourNumber(les.from, les.day, Number(week), year, file.semester == "summer");
+                var toDatetime = getDatetimeFromHourNumber(les.to, les.day, Number(week), file.year, file.semester == "summer");
+                toDatetime = new Date(toDatetime.getTime() - 10 * 1000 * 60);
+                contents += generateICalEvent(les, fromDatetime, toDatetime, 0);
+            });
+        }
     })
 
     // iCalendar footer
@@ -1746,18 +1776,14 @@ function getWeekNumber(d) {
     // Return week number
     return weekNo;
 } // checked (https://stackoverflow.com/a/6117889/7361496)
-function getDatetimeFromHourNumber(hour, dayIndex, week) {
+function getDatetimeFromHourNumber(hour, dayIndex, week, year, isSummer) {
     hour += 7; // Convert to actual hour
-
-    var date = new Date;
-    var currentDay = date.getDay();
-    var distance = (dayIndex + 1) - currentDay;
-    date.setDate(date.getDate() + distance);
-    if(isOddWeek(week) || isEvenWeek(week)) {
-        if(getWeekNumber(date)&1 != (isOddWeek(week) ? 1 : 0)) {
-            date.setDate(date.getDate() + 7);
-        }
+    if(isSummer) {
+        year += 1;
     }
+    var date = new Date(isSummer ? summerStart[year] : winterStart[year]);
+    date.setDate(date.getDate() + (week-1) * 7 + dayIndex);
+    date.setFullYear(year);
     date.setHours(hour, 0, 0, 0);
 
     return date;
@@ -1821,10 +1847,6 @@ function isEvenWeek(week, minEvenLessons = 3) {
     return false;
 } // checked
 function getSemesterWeekFromDate(date) {
-    // source: https://www.fit.vut.cz/study/calendar/.cs
-    // TODO: get this data automatically
-    var winterStart = {2022: "2022-09-19", 2023: "2023-09-18"};
-    var summerStart = {2023: "2023-02-06", 2024: "2024-02-05"};
     var dateWeek = getWeekNumber(date);
     var year = date.getFullYear();
     var winterStartWeek = getWeekNumber(new Date(winterStart[year]));
